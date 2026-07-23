@@ -142,12 +142,10 @@ streamlit run dashboard.py
 
 ## 📸 Dashboard Preview
 
-Add screenshots here.
+
 
 ```
-screenshots/dashboard.png
-screenshots/sales.png
-screenshots/financial.png
+
 ```
 
 ---
@@ -186,7 +184,7 @@ GitHub:
 https://github.com/HarshaVardhanReddyGujjula
 
 LinkedIn:
-(Add your LinkedIn profile)
+linkedin.com/in/gujjula-harsha-vardhan-reddy-55a6403a7
 
 ---
 
