@@ -142,7 +142,14 @@ streamlit run dashboard.py
 
 ## 📸 Dashboard Preview
 
+### Executive Dashboard
+![Executive Dashboard](screenshots/dashboard-1.png)
 
+### Work Orders & Financial Analytics
+![Work Orders and Financial Analytics](screenshots/dashboard-2.png)
+
+### Financial & Operations Analytics
+![Financial and Operations Analytics](screenshots/dashboard-3.png)
 
 ```
 
