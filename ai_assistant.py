@@ -1,369 +1,156 @@
-import sys
-from typing import Dict, Any
-from openai import OpenAI
-from bi_engine import BIEngine
+import os
+import re
+from typing import Dict, Any, Optional
 from config import logger, OPENAI_API_KEY
 
 
 class BusinessAssistant:
     """
     Business Intelligence Conversational AI Assistant.
-    Translates raw datasets and analytical summaries into actionable strategic recommendations.
+    Provides strategic business recommendations, cash-flow leakage audits,
+    and operational insights using GPT-4o (if API key is present) or
+    an advanced Built-in Analytical Reasoning Engine when offline.
     """
 
-    def __init__(self) -> None:
-        """
-        Initializes the BusinessAssistant with the OpenAI Client and cached summary dictionary.
-        """
+    def __init__(self, summary: Optional[Dict[str, Any]] = None):
         self.openai_key = OPENAI_API_KEY
-        if not self.openai_key:
-            logger.warning("OPENAI_API_KEY is not defined in the configurations. Live GPT queries will fail.")
-
-        # Initialize OpenAI client (safe instantiation)
-        self.client = OpenAI(api_key=self.openai_key) if self.openai_key else None
-        self.summary: Dict[str, Any] = {}
-
-    def load_summary(self) -> None:
-        """
-        Loads the executive summary metrics from the BIEngine.
-        Injects rich high-fidelity fallback metrics if live datasets are unconfigured or unavailable.
-        """
-        try:
-            logger.info("AI Assistant: Accessing BI Engine metrics...")
-            engine = BIEngine()
-
+        self.client = None
+        if self.openai_key:
             try:
-                engine.load_data()
+                from openai import OpenAI
+                self.client = OpenAI(api_key=self.openai_key)
             except Exception as e:
-                logger.warning(f"AI Assistant: Data source unconfigured or remote API connection failed: {str(e)}")
+                logger.warning(f"Could not initialize OpenAI client: {e}")
 
-            summary = engine.calculate_executive_summary()
+        self.summary: Dict[str, Any] = summary or {}
 
-            # Verify if the fetched summary contains valid records, otherwise inject fallback representation
-            if not summary or not summary.get("Deals") or not summary.get("Work_Orders"):
-                logger.info("AI Assistant: Empty dataset detected. Utilizing stable synthetic fallback metrics.")
-                self.summary = self._get_fallback_summary()
-            else:
-                self.summary = summary
+    def set_summary(self, summary: Dict[str, Any]) -> None:
+        """Updates the cached summary context."""
+        self.summary = summary
 
-            logger.info("AI Assistant: Summary context loaded successfully.")
-        except Exception as e:
-            logger.error(f"AI Assistant: Critical failure loading summary: {str(e)}", exc_info=True)
-            self.summary = self._get_fallback_summary()
+    def ask(self, query: str) -> str:
+        """Processes a natural language query and returns business insights."""
+        query_clean = query.strip()
+        if not query_clean:
+            return "Please provide a question regarding your sales pipeline, finances, or operations."
 
-    def _get_fallback_summary(self) -> Dict[str, Any]:
+        # If live OpenAI client is configured, call GPT
+        if self.client and self.openai_key:
+            try:
+                return self._ask_openai(query_clean)
+            except Exception as e:
+                logger.warning(f"OpenAI API call failed ({e}). Falling back to analytical engine.")
+
+        # Fallback to deterministic Business Analyst reasoning engine
+        return self._ask_analytical_engine(query_clean)
+
+    def _ask_openai(self, query: str) -> str:
+        """Queries OpenAI GPT with the live BI metrics context."""
+        system_prompt = (
+            "You are a Senior Strategic Business Analyst and BI Consultant. "
+            "Analyze the provided enterprise KPI data and answer the user's questions clearly, "
+            "citing specific numbers, KPIs, leakage points, and actionable business recommendations.\n\n"
+            f"LIVE DASHBOARD DATA:\n{self.summary}"
+        )
+
+        response = self.client.chat.completions.create(
+            model=os.getenv("OPENAI_MODEL", "gpt-4o"),
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": query}
+            ],
+            temperature=0.2,
+            max_tokens=650
+        )
+        return response.choices[0].message.content
+
+    def _ask_analytical_engine(self, query: str) -> str:
         """
-        Provides high-fidelity pre-compiled synthetic executive summary data matching sample CSV datasets.
+        Rule-based analytical intelligence engine that provides structured,
+        data-backed Business Analyst answers even without an external API key.
         """
-        return {
-            "Deals": {
-                "total_deals": 10,
-                "total_pipeline_value": 31215426.18,
-                "average_deal_value": 3121542.618,
-                "median_deal_value": 1714474.5,
-                "max_deal_value": 17616960.0,
-                "min_deal_value": 54900.68,
-                "high_probability_deals": 5,
-                "pipeline_by_status": {"Open": 6, "Won": 3, "Dead": 1},
-                "deals_by_owner": {"OWNER_002": 5, "OWNER_001": 2, "OWNER_003": 2, "OWNER_004": 1},
-                "deals_created_this_month": 0,
-                "expected_close_this_month": 0
-            },
-            "Work_Orders": {
-                "total_work_orders": 7,
-                "total_contract_value": 8806253.33,
-                "total_billed": 4983031.59,
-                "total_collected": 3291183.25,
-                "outstanding_receivables": 4799333.35,
-                "billing_completion_percent": 56.58,
-                "collection_efficiency": 66.05,
-                "average_contract_value": 1258036.19,
-                "largest_work_order": 3995568.00,
-                "work_orders_by_status": {
-                    "Completed": 4,
-                    "Executed until current month": 1,
-                    "Ongoing": 1,
-                    "Pause / struck": 1
-                }
-            },
-            "Financial": {
-                "revenue": 8806253.33,
-                "billed": 4983031.59,
-                "collected": 3291183.25,
-                "receivables": 4799333.35,
-                "billing_gap": 3823221.74,
-                "collection_gap": 1691848.34
-            },
-            "Operations": {
-                "total_projects": 7,
-                "completed_projects": 4,
-                "active_projects": 1,
-                "delayed_projects": 1,
-                "completion_rate": 57.14
-            }
-        }
-
-    def build_context(self) -> str:
-        """
-        Translates raw executive summary dictionary segments into a structured natural-language business context.
-        """
-        if not self.summary:
-            return "No company metrics or business intelligence data are currently loaded."
+        q = query.lower()
 
         deals = self.summary.get("Deals", {})
         wo = self.summary.get("Work_Orders", {})
-        financial = self.summary.get("Financial", {})
+        fin = self.summary.get("Financial", {})
         ops = self.summary.get("Operations", {})
 
-        context_lines = [
-            "MONDAY.COM ENTERPRISE BUSINESS INTELLIGENCE CONTEXT REPORT",
-            "===========================================================",
-            "",
-            "1. SALES PIPELINE & DEALS PERFORMANCE:",
-            f"- Total Deals Registered: {deals.get('total_deals', 'N/A')}",
-            (
-                f"- Total Gross Pipeline Value: INR "
-                f"{deals.get('total_pipeline_value', 'N/A'):,.2f}"
-                if isinstance(deals.get('total_pipeline_value'), (int, float))
-                else f"- Total Gross Pipeline Value: "
-                     f"{deals.get('total_pipeline_value', 'N/A')}"
-            ),
-            (
-                f"- Average Deal Value: INR "
-                f"{deals.get('average_deal_value', 'N/A'):,.2f}"
-                if isinstance(deals.get('average_deal_value'), (int, float))
-                else f"- Average Deal Value: "
-                     f"{deals.get('average_deal_value', 'N/A')}"
-            ),
-            (
-                f"- Median Deal Value: INR "
-                f"{deals.get('median_deal_value', 'N/A'):,.2f}"
-                if isinstance(deals.get('median_deal_value'), (int, float))
-                else f"- Median Deal Value: "
-                     f"{deals.get('median_deal_value', 'N/A')}"
-            ),
-            (
-                f"- Maximum Deal Value: INR "
-                f"{deals.get('max_deal_value', 'N/A'):,.2f}"
-                if isinstance(deals.get('max_deal_value'), (int, float))
-                else f"- Maximum Deal Value: "
-                     f"{deals.get('max_deal_value', 'N/A')}"
-            ),
-            (
-                f"- Minimum Deal Value: INR "
-                f"{deals.get('min_deal_value', 'N/A'):,.2f}"
-                if isinstance(deals.get('min_deal_value'), (int, float))
-                else f"- Minimum Deal Value: "
-                     f"{deals.get('min_deal_value', 'N/A')}"
-            ),
-            f"- Number of High-Probability Deals: {deals.get('high_probability_deals', 'N/A')}",
-            f"- Deals Created in current month cycle: {deals.get('deals_created_this_month', 'N/A')}",
-            f"- Pipeline deals expected to close in current cycle: {deals.get('expected_close_this_month', 'N/A')}",
-            "",
-            "Deals counts segmented by Sales Status / Stage:"
-        ]
+        pipe_val = deals.get("total_pipeline_value", 0.0)
+        weighted_val = deals.get("weighted_pipeline_value", 0.0)
+        win_rate = deals.get("win_rate_pct", 0.0)
+        total_deals = deals.get("total_deals", 0)
 
-        for status, count in deals.get("pipeline_by_status", {}).items():
-            context_lines.append(f"  * {status}: {count} deal(s)")
+        rev = fin.get("revenue", 0.0)
+        billed = fin.get("billed", 0.0)
+        collected = fin.get("collected", 0.0)
+        rec = fin.get("receivables", 0.0)
+        billing_gap = fin.get("billing_gap", 0.0)
+        collection_gap = fin.get("collection_gap", 0.0)
+        coll_eff = wo.get("collection_efficiency", 0.0)
 
-        context_lines.append("\nDeals counts segmented by Business Representative (Owner Code):")
-        for owner, count in deals.get("deals_by_owner", {}).items():
-            context_lines.append(f"  * {owner}: {count} deal(s)")
+        delayed = ops.get("delayed_projects", 0)
+        completed = ops.get("completed_projects", 0)
+        total_proj = ops.get("total_projects", 0)
+        comp_rate = ops.get("completion_rate", 0.0)
 
-        context_lines.extend([
-            "",
-            "2. SERVICE DELIVERY & ACTIVE WORK ORDERS:",
-            f"- Total Work Orders Logged: {wo.get('total_work_orders', 'N/A')}",
-            (
-                f"- Total Booked Contract Value: INR "
-                f"{wo.get('total_contract_value', 'N/A'):,.2f}"
-                if isinstance(wo.get('total_contract_value'), (int, float))
-                else f"- Total Booked Contract Value: "
-                     f"{wo.get('total_contract_value', 'N/A')}"
-            ),
-            (
-                f"- Invoiced / Billed Value: INR "
-                f"{wo.get('total_billed', 'N/A'):,.2f}"
-                if isinstance(wo.get('total_billed'), (int, float))
-                else f"- Invoiced / Billed Value: "
-                     f"{wo.get('total_billed', 'N/A')}"
-            ),
-            (
-                f"- Collections Cleared to Date: INR "
-                f"{wo.get('total_collected', 'N/A'):,.2f}"
-                if isinstance(wo.get('total_collected'), (int, float))
-                else f"- Collections Cleared to Date: "
-                     f"{wo.get('total_collected', 'N/A')}"
-            ),
-            (
-                f"- Total Accounts Receivable: INR "
-                f"{wo.get('outstanding_receivables', 'N/A'):,.2f}"
-                if isinstance(wo.get('outstanding_receivables'), (int, float))
-                else f"- Total Accounts Receivable: "
-                     f"{wo.get('outstanding_receivables', 'N/A')}"
-            ),
-            f"- Billing Completion Rate: {wo.get('billing_completion_percent', 'N/A')}%",
-            f"- Collections Efficiency Rate: {wo.get('collection_efficiency', 'N/A')}%",
-            (
-                f"- Average Work Order Value: INR "
-                f"{wo.get('average_contract_value', 'N/A'):,.2f}"
-                if isinstance(wo.get('average_contract_value'), (int, float))
-                else f"- Average Work Order Value: "
-                     f"{wo.get('average_contract_value', 'N/A')}"
-            ),
-            (
-                f"- Largest Single Work Order: INR "
-                f"{wo.get('largest_work_order', 'N/A'):,.2f}"
-                if isinstance(wo.get('largest_work_order'), (int, float))
-                else f"- Largest Single Work Order: "
-                     f"{wo.get('largest_work_order', 'N/A')}"
-            ),
-            "",
-            "Work Orders by Execution Status:"
-        ])
-
-        for status, count in wo.get("work_orders_by_status", {}).items():
-            context_lines.append(f"  * {status}: {count} order(s)")
-
-        context_lines.extend([
-            "",
-            "3. FINANCIAL SUMMARY & CASH RECONCILIATION AUDIT:",
-            (
-                f"- Total Contracted Revenue: INR "
-                f"{financial.get('revenue', 'N/A'):,.2f}"
-                if isinstance(financial.get('revenue'), (int, float))
-                else f"- Total Contracted Revenue: "
-                     f"{financial.get('revenue', 'N/A')}"
-            ),
-            (
-                f"- Total Billed Revenue: INR "
-                f"{financial.get('billed', 'N/A'):,.2f}"
-                if isinstance(financial.get('billed'), (int, float))
-                else f"- Total Billed Revenue: "
-                     f"{financial.get('billed', 'N/A')}"
-            ),
-            (
-                f"- Total Cash Collected: INR "
-                f"{financial.get('collected', 'N/A'):,.2f}"
-                if isinstance(financial.get('collected'), (int, float))
-                else f"- Total Cash Collected: "
-                     f"{financial.get('collected', 'N/A')}"
-            ),
-            (
-                f"- Outstanding Receivables: INR "
-                f"{financial.get('receivables', 'N/A'):,.2f}"
-                if isinstance(financial.get('receivables'), (int, float))
-                else f"- Outstanding Receivables: "
-                     f"{financial.get('receivables', 'N/A')}"
-            ),
-            (
-                f"- Unbilled Work Leakage (Billing Gap): INR "
-                f"{financial.get('billing_gap', 'N/A'):,.2f}"
-                if isinstance(financial.get('billing_gap'), (int, float))
-                else f"- Unbilled Work Leakage (Billing Gap): "
-                     f"{financial.get('billing_gap', 'N/A')}"
-            ),
-            (
-                f"- Invoiced Cash Awaiting Retrieval (Collection Gap): INR "
-                f"{financial.get('collection_gap', 'N/A'):,.2f}"
-                if isinstance(financial.get('collection_gap'), (int, float))
-                else f"- Invoiced Cash Awaiting Retrieval (Collection Gap): "
-                     f"{financial.get('collection_gap', 'N/A')}"
-            ),
-            "",
-            "4. OPERATIONS & PROJECT EXECUTION:",
-            f"- Total Assigned Projects: {ops.get('total_projects', 'N/A')}",
-            f"- Completed Projects: {ops.get('completed_projects', 'N/A')}",
-            f"- Active/Ongoing Projects: {ops.get('active_projects', 'N/A')}",
-            f"- Delayed or Paused Projects: {ops.get('delayed_projects', 'N/A')}",
-            f"- Overall Delivery Completion Rate: {ops.get('completion_rate', 'N/A')}%",
-            "==========================================================="
-        ])
-
-        return "\n".join(context_lines)
-
-    def ask(self, question: str) -> str:
-        """
-        Sends the compiled BI metrics and context alongside the user question to GPT-4o.
-        Provides highly reliable error-handling and API validation.
-        """
-        if not question or not question.strip():
-            logger.warning("AI Assistant: Empty query submitted.")
-            return "Query is empty. Please ask a valid question about your company data."
-
-        if not self.openai_key or not self.client:
-            logger.error("AI Assistant: OpenAI Client was not initialized. Check your OPENAI_API_KEY configuration.")
-            return "Error: OpenAI API Key is missing. Please define OPENAI_API_KEY in your configuration/environment."
-
-        try:
-            context = self.build_context()
-            prompt_content = (
-                f"Below is the company's real-time Business Intelligence context data:\n\n"
-                f"{context}\n\n"
-                f"Question: {question}"
+        # 1. Delayed / At Risk Projects
+        if any(w in q for w in ["delayed", "delay", "risk", "stuck", "pause", "blocked"]):
+            return (
+                f"🚨 **Operational Risk Analysis: Delayed Projects**\n\n"
+                f"- **Delayed / At-Risk Projects:** {delayed} out of {total_proj} total work orders.\n"
+                f"- **Average Project Completion:** {comp_rate:.1f}%\n"
+                f"- **Key Bottleneck Identified:** Work orders in 'Delayed / At Risk' or 'Pause' state "
+                f"directly contribute to unbilled inventory and delayed receivables.\n\n"
+                f"**Strategic BA Recommendation:**\n"
+                f"1. Conduct a milestone sprint review with project leads on the {delayed} flagged work orders.\n"
+                f"2. Validate client sign-offs for executed stages to unblock milestone billing."
             )
 
-            logger.info("AI Assistant: Querying OpenAI Chat Completions model (gpt-4o)...")
-            response = self.client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are an experienced Business Intelligence Consultant.\n"
-                            "Answer only from the provided company data.\n"
-                            "If the answer cannot be determined from the data, say that clearly.\n"
-                            "Provide concise executive recommendations."
-                        )
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt_content
-                    }
-                ],
-                temperature=0.2,
-                max_tokens=500
+        # 2. Collection Efficiency / Gap / Receivables
+        if any(w in q for w in ["collection", "receivable", "cash", "collected", "uncollected"]):
+            return (
+                f"💰 **Financial Health: Collection Efficiency & Accounts Receivable**\n\n"
+                f"- **Total Billed Amount:** ₹{billed:,.2f}\n"
+                f"- **Total Collected:** ₹{collected:,.2f}\n"
+                f"- **Outstanding Receivables:** ₹{rec:,.2f}\n"
+                f"- **Collection Efficiency Rate:** **{coll_eff:.1f}%** (Target: ≥ 85%)\n"
+                f"- **Collection Gap:** ₹{collection_gap:,.2f} awaiting realization.\n\n"
+                f"**Strategic BA Recommendation:**\n"
+                f"1. Implement a 30-day aged debtor review for all invoices with 'Partial' or 'Overdue' status.\n"
+                f"2. Institute upfront retainer terms (25–30%) on new contracts to protect working capital."
             )
 
-            answer = response.choices[0].message.content
-            logger.info("AI Assistant: Response successfully generated.")
-            return answer if answer else "No content returned from AI model."
+        # 3. Billing Gap / Revenue Leakage
+        if any(w in q for w in ["billing gap", "leakage", "unbilled", "billed"]):
+            return (
+                f"📊 **Billing Realization & Revenue Leakage Audit**\n\n"
+                f"- **Total Contracted Revenue:** ₹{rev:,.2f}\n"
+                f"- **Total Invoiced / Billed:** ₹{billed:,.2f}\n"
+                f"- **Billing Gap (Unbilled Revenue):** **₹{billing_gap:,.2f}**\n\n"
+                f"**Root-Cause Insights:**\n"
+                f"A billing gap of ₹{billing_gap:,.2f} indicates that executed work has not yet been converted "
+                f"into commercial invoices. Expediting phase-completion sign-offs will immediately capture this unbilled value."
+            )
 
-        except Exception as e:
-            logger.error(f"AI Assistant: Call failed: {str(e)}", exc_info=True)
-            return f"Error: An exception occurred while consulting OpenAI API: {str(e)}"
+        # 4. Pipeline / Deals / Sales Performance
+        if any(w in q for w in ["pipeline", "deals", "sales", "win rate", "conversion"]):
+            return (
+                f"💼 **Sales Pipeline & Conversion Intelligence**\n\n"
+                f"- **Total Pipeline Value:** ₹{pipe_val:,.2f} across {total_deals} opportunities.\n"
+                f"- **Probability-Weighted Pipeline:** **₹{weighted_val:,.2f}**\n"
+                f"- **Win Rate:** **{win_rate:.1f}%**\n"
+                f"- **High-Probability Deals:** {deals.get('high_probability_deals', 0)} deals with ≥70% confidence.\n\n"
+                f"**Strategic BA Recommendation:**\n"
+                f"Focus sales management bandwidth on closing the {deals.get('high_probability_deals', 0)} high-probability "
+                f"proposals in 'Negotiation' to guarantee revenue realization for the upcoming quarter."
+            )
 
-
-if __name__ == "__main__":
-    print("-----------------------------------")
-    print("Business Intelligence AI Assistant")
-    print("-----------------------------------")
-
-    try:
-        assistant = BusinessAssistant()
-        assistant.load_summary()
-
-        print("\n[✓] BI Engine Context initialized.")
-        print("[✓] AI Assistant ready for questions.")
-        print("(Type 'exit' or 'quit' to terminate the session)\n")
-
-        while True:
-            try:
-                user_query = input("Ask a question about your business data: ").strip()
-                if not user_query:
-                    continue
-                if user_query.lower() in ["exit", "quit"]:
-                    print("\nExiting BI AI Assistant. Goodbye!")
-                    break
-
-                print("\nAssistant is thinking...")
-                answer = assistant.ask(user_query)
-                print(f"\nAnswer:\n{answer}\n")
-                print("-" * 50)
-            except KeyboardInterrupt:
-                print("\nExiting BI AI Assistant. Goodbye!")
-                break
-    except Exception as e:
-        logger.error(f"Failed to start AI Assistant: {str(e)}", exc_info=True)
-        print(f"Python Error: {str(e)}")
-        sys.exit(1)
+        # 5. Executive Summary / General Overview / Recommendations
+        return (
+            f"📈 **Executive Business Intelligence Briefing**\n\n"
+            f"**1. Sales Health:** Pipeline stands at **₹{pipe_val:,.2f}** ({total_deals} deals) with a weighted realization of **₹{weighted_val:,.2f}** and a **{win_rate:.1f}%** win rate.\n"
+            f"**2. Operations:** **{completed}/{total_proj}** projects delivered ({comp_rate:.1f}% completion rate) with **{delayed}** project(s) requiring active intervention.\n"
+            f"**3. Cash Realization:** **₹{collected:,.2f}** collected against **₹{billed:,.2f}** billed (**{coll_eff:.1f}%** collection efficiency). Outstanding receivables: **₹{rec:,.2f}**.\n\n"
+            f"**Top Strategic Priority:** Close the **₹{billing_gap:,.2f}** billing gap by accelerating milestone completions and formalizing invoice schedules."
+        )
