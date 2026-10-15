@@ -2,10 +2,10 @@
 
 An enterprise-grade **Business Intelligence (BI) and Decision-Support Platform** built with **Python, Streamlit, SQLite DBMS, Plotly, Monday.com API, and OpenAI** to analyze sales pipelines, revenue trends, customer segments, financial leakage, and operational performance.
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://monday-bi-agent-harsha.streamlit.app/)
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://monday-bi-agent-55bea6prkmggu8gdeg3ftm.streamlit.app/)
 [![GitHub Repo](https://img.shields.io/badge/GitHub-Repository-181717?logo=github)](https://github.com/HarshaVardhanReddyGujjula/Monday-BI-Agent)
 
-🔗 **Live Interactive Demo:** [monday-bi-agent-harsha.streamlit.app](https://monday-bi-agent-harsha.streamlit.app/)  
+🔗 **Live Interactive Demo:** [monday-bi-agent-55bea6prkmggu8gdeg3ftm.streamlit.app](https://monday-bi-agent-55bea6prkmggu8gdeg3ftm.streamlit.app/)  
 📂 **Source Code:** [github.com/HarshaVardhanReddyGujjula/Monday-BI-Agent](https://github.com/HarshaVardhanReddyGujjula/Monday-BI-Agent)
 
 ---
